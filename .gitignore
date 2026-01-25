@@ -1,0 +1,19 @@
+# Third-party executables
+alpha-bleed.exe
+
+# 3ds Max temporary files
+*.bak
+*.sv$
+*.log
+*_auto*.max
+max_temp.max
+sceneassets/images/*.jpg
+
+# Local settings and data
+PowerShader_settings.ini
+*.ms.bak
+*.mcr.bak
+
+# System files
+Thumbs.db
+.DS_Store
