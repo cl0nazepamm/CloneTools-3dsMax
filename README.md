@@ -20,7 +20,8 @@ Copy the desired scripts to your 3ds Max user scripts directory:
 ### PowerShader.ms
 Fast material search, creation, and instancing tool with drag-to-viewport support. Focused on USD and OSL workflows.
 
-<img src="images/PowerShader_1.gif" width="500">
+<img src="images/PowerShader.png" width="500">
+<img src="images/PowerShader_2.gif" width="500">
 
 ### GLTF_Maker.ms
 Quickly load bitmaps from a folder and create GLTF materials in one click. Speeds up Babylon.js workflows. Supports USDpreviewsurface too.
@@ -46,7 +47,7 @@ Converts Reallusion standard skeleton (AccuRig or Character Creator) to 3ds Max 
 ### Clone_UE_To_BIPED.ms
 Converts Unreal Engine skeleton to 3ds Max Biped.
 
-<img src="images/UE_to_Biped.gif" width="500">
+<img src="images/UE_to_BIPED.gif" width="500">
 
 ### UE5_Mixamo_BoneSwapper.ms
 Swaps bone names between UE5 and Mixamo naming conventions. Useful for sending UE5 mannequin to Mixamo.
