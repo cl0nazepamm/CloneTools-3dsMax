@@ -16,7 +16,7 @@ buttonText:"GLTF Maker"
 (
 	try(destroyDialog GLTF_Maker_Rollout) catch()
 
-	rollout GLTF_Maker_Rollout "GLTF Maker" width:420 height:650
+	rollout GLTF_Maker_Rollout "GLTF Maker" width:420 height:720
 	(
 		-- Variables to store file paths
 		local baseColorPath = ""
@@ -27,6 +27,7 @@ buttonText:"GLTF Maker"
 		local ormPath = ""
 		local emissionPath = ""
 		local alphaPath = ""
+		local displacementPath = ""
 
 		local isORMMode = false
 
@@ -68,6 +69,14 @@ buttonText:"GLTF Maker"
 
 			label lbl_alpha "Alpha:" across:2 align:#left
 			edittext edt_alpha "" width:300 readonly:true align:#right
+
+			label lbl_disp "Displacement:" across:2 align:#left
+			edittext edt_disp "" width:300 readonly:true align:#right
+		)
+
+		group "Target Material"
+		(
+			radiobuttons rdo_target "" labels:#("glTF Material", "USD Preview Surface") default:1 columns:1
 		)
 
 		group "Workflow Mode"
@@ -119,6 +128,7 @@ buttonText:"GLTF Maker"
 			if findString lowerName "base_color" != undefined then return #baseColor
 			if findString lowerName "albedo" != undefined then return #baseColor
 			if findString lowerName "diffuse" != undefined then return #baseColor
+			if findString lowerName "_diff" != undefined then return #baseColor
 			if findString lowerName "_col." != undefined then return #baseColor
 			if findString lowerName "_col_" != undefined then return #baseColor
 			if findString lowerName "_color" != undefined then return #baseColor
@@ -152,6 +162,10 @@ buttonText:"GLTF Maker"
 			if findString lowerName "opacity" != undefined then return #alpha
 			if findString lowerName "transparency" != undefined then return #alpha
 
+			if findString lowerName "displacement" != undefined then return #displacement
+			if findString lowerName "_disp" != undefined then return #displacement
+			if findString lowerName "_height" != undefined then return #displacement
+
 			return #unknown
 		)
 
@@ -175,6 +189,7 @@ buttonText:"GLTF Maker"
 			edt_orm.text = ""
 			edt_emission.text = ""
 			edt_alpha.text = ""
+			edt_disp.text = ""
 		)
 
 		-- Function to process files
@@ -200,6 +215,7 @@ buttonText:"GLTF Maker"
 						#orm: (ormPath = f; edt_orm.text = getFilenameFile f; foundORM = true; assignedCount += 1)
 						#emission: (emissionPath = f; edt_emission.text = getFilenameFile f; assignedCount += 1)
 						#alpha: (alphaPath = f; edt_alpha.text = getFilenameFile f; assignedCount += 1)
+						#displacement: (displacementPath = f; edt_disp.text = getFilenameFile f; assignedCount += 1)
 					)
 				)
 			)
@@ -237,7 +253,7 @@ buttonText:"GLTF Maker"
 
 					-- Try to get material name from first texture
 					local firstName = getFilenameFile maxFiles[1]
-					local suffixes = #("_basecolor", "_base_color", "_albedo", "_diffuse", "_normal", "_nrm", "_roughness", "_rough", "_metallic", "_metalness", "_ao", "_occlusion", "_orm", "_emission", "_emissive", "_alpha", "_opacity")
+					local suffixes = #("_basecolor", "_base_color", "_albedo", "_diffuse", "_diff", "_normal", "_nrm", "_roughness", "_rough", "_metallic", "_metalness", "_ao", "_occlusion", "_orm", "_emission", "_emissive", "_alpha", "_opacity", "_disp", "_displacement", "_height")
 					local baseName = firstName
 					for suffix in suffixes do
 					(
@@ -259,17 +275,23 @@ buttonText:"GLTF Maker"
 
 		on btn_create pressed do
 		(
-			if (classof glTFMaterial) == UndefinedClass then
+			local isUSD = (rdo_target.state == 2)
+			
+			if not isUSD and (classof glTFMaterial) == UndefinedClass then
 			(
 				messageBox "glTFMaterial class not found!\n\nPlease ensure the Babylon.js Exporter plugin is installed." title:"Error"
+				return()
+			)
+			
+			if isUSD and (classof MaxUsdPreviewSurface) == UndefinedClass then
+			(
+				messageBox "MaxUsdPreviewSurface class not found!\n\nPlease ensure the USD plugin is installed." title:"Error"
 				return()
 			)
 
 			local matName = edt_matName.text
 			if matName == "" do matName = "M_Objects"
-
-			local gltfMat = glTFMaterial name:matName
-
+			
 			fn createBitmapNode filePath =
 			(
 				if filePath != "" and doesFileExist filePath then
@@ -282,80 +304,137 @@ buttonText:"GLTF Maker"
 			)
 
 			local mapsAssigned = 0
+			local finalMat = undefined
 
-			if baseColorPath != "" do
+			if isUSD then
 			(
-				local bmp = createBitmapNode baseColorPath
-				if bmp != undefined do (gltfMat.baseColorMap = bmp; mapsAssigned += 1)
-			)
-
-			if normalPath != "" do
-			(
-				local bmp = createBitmapNode normalPath
-				if bmp != undefined do (gltfMat.normalMap = bmp; mapsAssigned += 1)
-			)
-
-			if alphaPath != "" do
-			(
-				local bmp = createBitmapNode alphaPath
-				if bmp != undefined do (gltfMat.alphaMap = bmp; mapsAssigned += 1)
-			)
-
-			if emissionPath != "" do
-			(
-				local bmp = createBitmapNode emissionPath
-				if bmp != undefined do (gltfMat.emissionMap = bmp; mapsAssigned += 1)
-			)
-
-			if rdo_mode.state == 2 then
-			(
-				if ormPath != "" do
+				finalMat = MaxUsdPreviewSurface name:matName
+				finalMat.diffuseColor = color 255 255 255
+				
+				if baseColorPath != "" do
 				(
-					local bmp = createBitmapNode ormPath
-					if bmp != undefined do
+					local bmp = createBitmapNode baseColorPath
+					if bmp != undefined do (finalMat.diffuseColor_map = bmp; mapsAssigned += 1)
+				)
+				if normalPath != "" do
+				(
+					local bmp = createBitmapNode normalPath
+					if bmp != undefined do (finalMat.normal_map = bmp; mapsAssigned += 1)
+				)
+				if alphaPath != "" do
+				(
+					local bmp = createBitmapNode alphaPath
+					if bmp != undefined do (finalMat.opacity_map = bmp; mapsAssigned += 1)
+				)
+				if emissionPath != "" do
+				(
+					local bmp = createBitmapNode emissionPath
+					if bmp != undefined do (finalMat.emissiveColor_map = bmp; mapsAssigned += 1)
+				)
+				if displacementPath != "" do
+				(
+					local bmp = createBitmapNode displacementPath
+					if bmp != undefined do (finalMat.displacement_map = bmp; mapsAssigned += 1)
+				)
+
+				if rdo_mode.state == 2 then -- ORM
+				(
+					if ormPath != "" do
 					(
-						try(gltfMat.ambientOcclusionMap = bmp)catch()
-						try(gltfMat.roughnessMetallicMap = bmp)catch()
-						try(gltfMat.roughnessMap = bmp)catch()
-						try(gltfMat.metalnessMap = bmp)catch()
-						mapsAssigned += 1
+						local bmp = createBitmapNode ormPath
+						if bmp != undefined do
+						(
+							finalMat.occlusion_map = bmp
+							finalMat.roughness_map = bmp
+							finalMat.metallic_map = bmp
+							mapsAssigned += 1
+						)
+					)
+				)
+				else
+				(
+					if roughnessPath != "" do
+					(
+						local bmp = createBitmapNode roughnessPath
+						if bmp != undefined do (finalMat.roughness_map = bmp; mapsAssigned += 1)
+					)
+					if metalnessPath != "" do
+					(
+						local bmp = createBitmapNode metalnessPath
+						if bmp != undefined do (finalMat.metallic_map = bmp; mapsAssigned += 1)
+					)
+					if aoPath != "" do
+					(
+						local bmp = createBitmapNode aoPath
+						if bmp != undefined do (finalMat.occlusion_map = bmp; mapsAssigned += 1)
 					)
 				)
 			)
 			else
 			(
-				if roughnessPath != "" do
+				finalMat = glTFMaterial name:matName
+				
+				if baseColorPath != "" do
 				(
-					local bmp = createBitmapNode roughnessPath
-					if bmp != undefined do
-					(
-						try(gltfMat.roughnessMap = bmp; mapsAssigned += 1)catch()
-					)
+					local bmp = createBitmapNode baseColorPath
+					if bmp != undefined do (finalMat.baseColorMap = bmp; mapsAssigned += 1)
+				)
+				if normalPath != "" do
+				(
+					local bmp = createBitmapNode normalPath
+					if bmp != undefined do (finalMat.normalMap = bmp; mapsAssigned += 1)
+				)
+				if alphaPath != "" do
+				(
+					local bmp = createBitmapNode alphaPath
+					if bmp != undefined do (finalMat.alphaMap = bmp; mapsAssigned += 1)
+				)
+				if emissionPath != "" do
+				(
+					local bmp = createBitmapNode emissionPath
+					if bmp != undefined do (finalMat.emissionMap = bmp; mapsAssigned += 1)
 				)
 
-				if metalnessPath != "" do
+				if rdo_mode.state == 2 then
 				(
-					local bmp = createBitmapNode metalnessPath
-					if bmp != undefined do
+					if ormPath != "" do
 					(
-						try(gltfMat.metalnessMap = bmp; mapsAssigned += 1)catch()
+						local bmp = createBitmapNode ormPath
+						if bmp != undefined do
+						(
+							try(finalMat.ambientOcclusionMap = bmp)catch()
+							try(finalMat.roughnessMetallicMap = bmp)catch()
+							try(finalMat.roughnessMap = bmp)catch()
+							try(finalMat.metalnessMap = bmp)catch()
+							mapsAssigned += 1
+						)
 					)
 				)
-
-				if aoPath != "" do
+				else
 				(
-					local bmp = createBitmapNode aoPath
-					if bmp != undefined do
+					if roughnessPath != "" do
 					(
-						try(gltfMat.ambientOcclusionMap = bmp; mapsAssigned += 1)catch()
+						local bmp = createBitmapNode roughnessPath
+						if bmp != undefined do (try(finalMat.roughnessMap = bmp; mapsAssigned += 1)catch())
+					)
+					if metalnessPath != "" do
+					(
+						local bmp = createBitmapNode metalnessPath
+						if bmp != undefined do (try(finalMat.metalnessMap = bmp; mapsAssigned += 1)catch())
+					)
+					if aoPath != "" do
+					(
+						local bmp = createBitmapNode aoPath
+						if bmp != undefined do (try(finalMat.ambientOcclusionMap = bmp; mapsAssigned += 1)catch())
 					)
 				)
 			)
 
-			mtl_slot.material = gltfMat
+			mtl_slot.material = finalMat
 
 			local modeStr = if rdo_mode.state == 2 then "ORM" else "Standard PBR"
-			lbl_status.text = "Created: " + matName + " (" + modeStr + ") - " + (mapsAssigned as string) + " maps"
+			local typeStr = if isUSD then "USD" else "glTF"
+			lbl_status.text = "Created: " + matName + " (" + typeStr + "/" + modeStr + ") - " + (mapsAssigned as string) + " maps"
 		)
 	)
 

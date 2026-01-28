@@ -1,6 +1,6 @@
 # CloneTools-3dsMax
 
-A collection of productivity scripts for Autodesk 3ds Max, focused on material management, rigging workflows, and USD pipelines.
+Some 3dsmax scripts to speed up my workflows. Mostly USD related.
 
 ![Logo](images/Logo.png)
 
@@ -10,15 +10,12 @@ Copy the desired scripts to your 3ds Max user scripts directory:
 ```
 %USERPROFILE%\AppData\Local\Autodesk\3dsMax\<version>\ENU\scripts\
 ```
-
-For `.mcr` files (macroscripts), copy to:
 ```
 %USERPROFILE%\AppData\Local\Autodesk\3dsMax\<version>\ENU\usermacros\
 ```
 
 ---
 
-## Materials
 
 ### PowerShader.ms
 Fast material search, creation, and instancing tool with drag-to-viewport support. Focused on USD and OSL workflows.
@@ -27,7 +24,7 @@ Fast material search, creation, and instancing tool with drag-to-viewport suppor
 <img src="images/PowerShader_2.gif" width="500">
 
 ### GLTF_Maker.ms
-Quickly load bitmaps from a folder and create GLTF materials in one click. Speeds up Babylon.js workflows.
+Quickly load bitmaps from a folder and create GLTF materials in one click. Speeds up Babylon.js workflows. Supports USDpreviewsurface too.
 
 <img src="images/GLTF_Maker.png" width="400">
 <img src="images/GLTF_Maker2.gif" width="500">
@@ -83,17 +80,9 @@ Quickly turns an object into a live surface and enables freeform retopology tool
 
 ## Requirements
 
-- Autodesk 3ds Max 2024 or newer
-- Some scripts require specific plugins (Redshift, tyFlow, etc.) - they will gracefully disable features if plugins are not available
+- Autodesk 3ds Max 2024
 
-## Credits
-
-- `OSL_SME_DropHandler.ms` - Original script by Changsoo Eun (www.changsooeun.com)
 
 ## License
 
 MIT License
-
-## Author
-
-Clone

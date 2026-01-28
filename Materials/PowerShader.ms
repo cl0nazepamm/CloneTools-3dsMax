@@ -287,6 +287,7 @@ global PowerShaderInstance
                 (
                     view.SelectNone()
                     try(newSmeNode.selected = true) catch()
+					try(view.ZoomExtents type:#selected) catch()
                 )
             )
             else
@@ -724,7 +725,7 @@ global PowerShaderInstance
             
             -- Create Form - NO FADE, instant display
             form = dotNetObject "MaxCustomControls.MaxForm"
-            form.Text = "⚡ PowerShader"
+            form.Text = "⚡ PowerShader USD/OSL"
             form.Size = dotNetObject "System.Drawing.Size" 360 expandedHeight
             form.FormBorderStyle = (dotNetClass "System.Windows.Forms.FormBorderStyle").FixedToolWindow
             form.StartPosition = (dotNetClass "System.Windows.Forms.FormStartPosition").Manual
