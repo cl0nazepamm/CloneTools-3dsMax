@@ -21,7 +21,6 @@ Copy the desired scripts to your 3ds Max user scripts directory:
 Fast material search, creation, and instancing tool with drag-to-viewport support. Focused on USD and OSL workflows.
 
 <img src="images/PowerShader_1.gif" width="500">
-<img src="images/PowerShader_2.gif" width="500">
 
 ### GLTF_Maker.ms
 Quickly load bitmaps from a folder and create GLTF materials in one click. Speeds up Babylon.js workflows. Supports USDpreviewsurface too.
