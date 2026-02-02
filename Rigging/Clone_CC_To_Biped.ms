@@ -1,5 +1,4 @@
 -- Creates biped from CC base rig (For unreal skeletons use Clone_PowerUE_BIPED.ms)
- -- Clone 2025
  
  -- 1. Create the biped
 
@@ -245,14 +244,6 @@ biped.pasteposture ($bip001.controller) #posture true pc
 
 
 
--- Leg alignment: position Thigh/Calf/Foot to match CC (like old UE script)
-biped.setTransform $'Bip001 L Thigh' #pos $CC_Base_L_Thigh.transform.position false
-biped.setTransform $'Bip001 L Calf' #pos $CC_Base_L_Calf.transform.position false
-biped.setTransform $'Bip001 L Foot' #pos $CC_Base_L_Foot.transform.position false
-biped.setTransform $'Bip001 R Thigh' #pos $CC_Base_R_Thigh.transform.position false
-biped.setTransform $'Bip001 R Calf' #pos $CC_Base_R_Calf.transform.position false
-biped.setTransform $'Bip001 R Foot' #pos $CC_Base_R_Foot.transform.position false
-
 thighdis = distance $CC_Base_L_Thigh $CC_Base_L_Calf
 biped.setTransform $'Bip001 L Thigh' #scale ([thighdis+(thighdis*0.047),thighdis,thighdis]) True
 
@@ -292,31 +283,6 @@ biped.setTransform $'Bip001 R Foot' #scale ([FootDis,FootLngth+(FootLngth*0.3),F
 biped.setTransform $'Bip001 L Foot' #scale ([FootDis,FootLngth+(FootLngth*0.3),FootDis]) True
 biped.setTransform $'Bip001 R Toe0' #scale ([FootDis,1,FootDis]) True
 biped.setTransform $'Bip001 L Toe0' #scale ([FootDis,1,FootDis]) True
-
--- Foot rotation: align biped feet to CC Foot->ToeBase direction (like old UE script foot alignment)
-fn createFootHelperCC srcBone tgtBone = (
-	n = "myPoint" + srcBone.name
-	p = point name:n centermarker:off axistripod:on cross:off box:on pos:srcBone.transform.position isSelected:off
-	p.rotation.controller = LookAt_Constraint()
-	p.rotation.controller.appendTarget tgtBone 50.0
-	p.rotation.controller.relative = false
-	p.rotation.controller.target_axis = 0
-	p.rotation.controller.target_axisFlip = true
-	p.rotation.controller.upnode_world = true
-	p.rotation.controller.StoUP_axis = 2
-	p.rotation.controller.StoUP_axisFlip = true
-	p.rotation.controller.upnode_axis = 2
-	finalTM = p.transform
-	p.rotation.controller = Euler_XYZ()
-	p.transform = finalTM
-	p
-)
-lFootHelper = createFootHelperCC $CC_Base_L_Foot $CC_Base_L_ToeBase
-rFootHelper = createFootHelperCC $CC_Base_R_Foot $CC_Base_R_ToeBase
-biped.setTransform $'Bip001 L Foot' #rotation lFootHelper.transform.rotation true
-biped.setTransform $'Bip001 R Foot' #rotation rFootHelper.transform.rotation true
-delete lFootHelper
-delete rFootHelper
 
 select #($'Bip001 L Finger22', $'Bip001 L Finger32', $'Bip001 L Finger42', $'Bip001 L Finger12')
 
