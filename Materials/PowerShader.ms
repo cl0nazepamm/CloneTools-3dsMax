@@ -26,17 +26,21 @@ global PowerShaderInstance
         pnlStatus,
         lblStatus,
         chkApplyToSel,
+        chkSceneItems,
+        chkAutoFocus,
         pnlPreview,
         picPreview,
         btnCompact,
         
-        -- Quick Buttons Row 1 (Shaders - USD focused)
-        btnUSD, btnPhys, btnRS, btnPBR, btnGLTF,
-        -- Quick Buttons Row 2 (Textures - OSL focused)  
+        -- Quick Buttons Row 1 (Shaders)
+        btnARND, btnPhys, btnUSD, btnPBR, btnGLTF, btnSHLL,
+        -- Quick Buttons Row 2 (Textures - OSL focused)
         btnOSL, btnBMP, btnRSTX, btnTY, btnNoise, btnGrad,
+        -- Quick Buttons Row 3 (Utilities)
+        btnLINK, btnFLSH,
         
         -- Tab Buttons
-        tabAll, tabMat, tabMap, tabScene, tabFav,
+        tabAll, tabMat, tabMap, tabFav,
         currentTab = "All",
         
         -- ============== STATE ==============
@@ -45,18 +49,30 @@ global PowerShaderInstance
         dragStartPos = [0,0],
         dragItem = undefined,
         isCompact = false,
-        expandedHeight = 520,
+        expandedHeight = 550,
         compactHeight = 180,
         
         -- ============== DATA ==============
         allNames = #(),
         allClasses = #(),
         allCategories = #(),
+        allNamesLower = #(),
+        allClassKeys = #(),
         currentNames = #(),
         currentClasses = #(),
+        currentClassKeys = #(),
         favorites = #(),
         recentItems = #(),
         maxRecent = 10,
+        previewPath = "",
+        listWidthFull = 328,
+        listWidthPreview = 224,
+        setApplyToSel = false,
+        setSceneItems = false,
+        setAutoFocus = true,
+        uiToolTip = undefined,
+        statusTextCache = "",
+        statusColorCache = -1,
         
         -- Plugin Availability
         hasRedshift = false,
@@ -107,6 +123,27 @@ global PowerShaderInstance
         
         fn sortPairByName a b = (toLower a[1]) < (toLower b[1]),
         
+        fn isBrowsableClass c =
+        (
+            if c == undefined do return false
+            
+            local clsName = toLower (try(c as string)catch(""))
+            if clsName == "" do return false
+            
+            local isCreatable = try(c.creatable)catch(true)
+            if isCreatable != true do return false
+            
+            if (findString clsName "wrapper") != undefined do return false
+            if clsName == "dummyclass" do return false
+            if clsName == "nomaterial" do return false
+            if clsName == "notexture" do return false
+            if clsName == "multimaterial_empty" do return false
+            if clsName == "missing_mtl" do return false
+            if clsName == "missing_map" do return false
+            
+            true
+        ),
+        
         fn detectPlugins =
         (
             hasRedshift = try(RS_Standard_Material != undefined) catch(false)
@@ -144,6 +181,9 @@ global PowerShaderInstance
         (
             favorites = #()
             recentItems = #()
+            setApplyToSel = false
+            setSceneItems = false
+            setAutoFocus = true
             if doesFileExist settingsFile do
             (
                 local f = openFile settingsFile mode:"r"
@@ -154,6 +194,9 @@ global PowerShaderInstance
                         local line = readLine f
                         if matchPattern line pattern:"FAV:*" do append favorites (substring line 5 -1)
                         if matchPattern line pattern:"REC:*" do append recentItems (substring line 5 -1)
+                        if matchPattern line pattern:"OPT_APPLY:*" do setApplyToSel = (substring line 11 -1) == "1"
+                        if matchPattern line pattern:"OPT_SCENE:*" do setSceneItems = (substring line 11 -1) == "1"
+                        if matchPattern line pattern:"OPT_FOCUS:*" do setAutoFocus = (substring line 11 -1) == "1"
                     )
                     close f
                 )
@@ -162,44 +205,96 @@ global PowerShaderInstance
         
         fn saveSettings =
         (
+            setApplyToSel = try(chkApplyToSel.Checked)catch(setApplyToSel)
+            setSceneItems = try(chkSceneItems.Checked)catch(setSceneItems)
+            setAutoFocus = try(chkAutoFocus.Checked)catch(setAutoFocus)
+            
             local f = createFile settingsFile
             if f != undefined do
             (
                 for fav in favorites do format "FAV:%\n" fav to:f
                 for rec in recentItems do format "REC:%\n" rec to:f
+                format "OPT_APPLY:%\n" (if setApplyToSel then 1 else 0) to:f
+                format "OPT_SCENE:%\n" (if setSceneItems then 1 else 0) to:f
+                format "OPT_FOCUS:%\n" (if setAutoFocus then 1 else 0) to:f
                 close f
             )
         ),
         
         fn setStatus txt col: =
         (
-            if col == unsupplied do col = cTextDim
-            lblStatus.Text = txt
-            lblStatus.ForeColor = col
+            local nextColor = if col == unsupplied then cTextDim else col
+            local nextArgb = nextColor.ToArgb()
+            
+            if lblStatus == undefined do return()
+            
+            if statusTextCache != txt do
+            (
+                lblStatus.Text = txt
+                statusTextCache = txt
+            )
+            
+            if statusColorCache != nextArgb do
+            (
+                lblStatus.ForeColor = nextColor
+                statusColorCache = nextArgb
+            )
+        ),
+        
+        fn setPreviewLayout showPreview =
+        (
+            if lstResults != undefined do
+            (
+                local targetWidth = if showPreview then listWidthPreview else listWidthFull
+                if lstResults.Width != targetWidth do lstResults.Width = targetWidth
+            )
+            
+            if pnlPreview != undefined do pnlPreview.Visible = (showPreview and not isCompact)
+        ),
+        
+        fn clearPreview =
+        (
+            if picPreview != undefined and picPreview.Image != undefined do
+            (
+                try(picPreview.Image.Dispose())catch()
+                picPreview.Image = undefined
+            )
+            
+            previewPath = ""
+            setPreviewLayout false
         ),
         
         fn updatePreview item =
         (
-            if pnlPreview == undefined do return()
+            if pnlPreview == undefined or picPreview == undefined do return()
             
-            local showPreview = false
+            local filePath = ""
+            local candidatePath = try(item.filename as string)catch("")
+            if candidatePath != "" and doesFileExist candidatePath do filePath = candidatePath
             
-            -- Check if it's a bitmap texture with a valid file
-            if isKindOf item Bitmaptexture and item.filename != "" do
+            if filePath == "" do
             (
-                if doesFileExist item.filename do
-                (
-                    try
-                    (
-                        local bmp = dotNetObject "System.Drawing.Bitmap" item.filename
-                        picPreview.Image = bmp
-                        showPreview = true
-                    )
-                    catch()
-                )
+                clearPreview()
+                return()
             )
             
-            pnlPreview.Visible = showPreview
+            local fileKey = toLower filePath
+            if fileKey == previewPath and picPreview.Image != undefined do
+            (
+                setPreviewLayout true
+                return()
+            )
+            
+            clearPreview()
+            
+            try
+            (
+                local bmp = dotNetObject "System.Drawing.Bitmap" filePath
+                picPreview.Image = bmp
+                previewPath = fileKey
+                setPreviewLayout true
+            )
+            catch(clearPreview())
         ),
         
         -- ============== MATERIAL OPERATIONS ==============
@@ -230,9 +325,455 @@ global PowerShaderInstance
             )
             return false
         ),
+
+        fn focusSmeNode view smeNode =
+        (
+            if view == undefined or smeNode == undefined do return()
+
+            local autoFocus = try(chkAutoFocus.Checked)catch(setAutoFocus)
+            if autoFocus do
+            (
+                view.SelectNone()
+                try(smeNode.selected = true)catch()
+                try(view.ZoomExtents type:#selected)catch()
+            )
+        ),
         
+        fn scoreAlbedoCandidate tex slotName =
+        (
+            if tex == undefined do return -100000
+            
+            local slot = toLower (slotName as string)
+            local clsName = toLower (classOf tex as string)
+            local mapName = toLower (try(tex.name as string)catch(""))
+            local fileName = toLower (try(tex.filename as string)catch(""))
+            local oslPath = toLower (try(tex.OSLPath as string)catch(""))
+            local score = 0
+            
+            -- Positive signals: diffuse/base-color intent and uberbitmap preference
+            if matchPattern slot pattern:"*base*color*" do score += 180
+            if matchPattern slot pattern:"*albedo*" do score += 170
+            if matchPattern slot pattern:"*diffuse*" do score += 160
+            if matchPattern slot pattern:"*color*" do score += 60
+            
+            if matchPattern fileName pattern:"*albedo*" do score += 220
+            if matchPattern fileName pattern:"*basecolor*" do score += 210
+            if matchPattern fileName pattern:"*base_color*" do score += 210
+            if matchPattern fileName pattern:"*diffuse*" do score += 190
+            
+            if matchPattern mapName pattern:"*albedo*" do score += 120
+            if matchPattern mapName pattern:"*basecolor*" do score += 110
+            if matchPattern mapName pattern:"*diffuse*" do score += 100
+            
+            if matchPattern clsName pattern:"*uberbitmap*" do score += 260
+            if matchPattern mapName pattern:"*uberbitmap*" do score += 260
+            if matchPattern oslPath pattern:"*uberbitmap*" do score += 280
+            
+            if fileName != "" do score += 20
+            
+            -- Negative signals: non-albedo texture purposes
+            for bad in #("rough", "metal", "normal", "bump", "ao", "ambient", "height", "displace", "disp", "opacity", "alpha", "spec", "gloss", "emit", "emissive", "mask") do
+            (
+                if matchPattern slot pattern:("*" + bad + "*") do score -= 320
+                if matchPattern fileName pattern:("*" + bad + "*") do score -= 260
+                if matchPattern mapName pattern:("*" + bad + "*") do score -= 180
+            )
+            
+            score
+        ),
+        
+        fn walkTexForAlbedo tex slotName visitedTex bestMapRef bestScoreRef =
+        (
+            if tex == undefined do return()
+            if findItem visitedTex tex > 0 do return()
+            
+            append visitedTex tex
+            
+            local score = scoreAlbedoCandidate tex slotName
+            if score > bestScoreRef[1] do
+            (
+                bestScoreRef[1] = score
+                bestMapRef[1] = tex
+            )
+            
+            local nSub = try(getNumSubTexmaps tex)catch(0)
+            for i = 1 to nSub do
+            (
+                local subTex = try(getSubTexmap tex i)catch(undefined)
+                if subTex != undefined do
+                (
+                    local subSlot = try(getSubTexmapSlotName tex i as string)catch(slotName)
+                    walkTexForAlbedo subTex subSlot visitedTex bestMapRef bestScoreRef
+                )
+            )
+        ),
+        
+        fn walkMatForAlbedo mat visitedMats visitedTex bestMapRef bestScoreRef =
+        (
+            if mat == undefined do return()
+            if findItem visitedMats mat > 0 do return()
+            
+            append visitedMats mat
+            
+            local nTex = try(getNumSubTexmaps mat)catch(0)
+            for i = 1 to nTex do
+            (
+                local tex = try(getSubTexmap mat i)catch(undefined)
+                if tex != undefined do
+                (
+                    local slotName = try(getSubTexmapSlotName mat i as string)catch("")
+                    walkTexForAlbedo tex slotName visitedTex bestMapRef bestScoreRef
+                )
+            )
+            
+            local nMtl = try(getNumSubMtls mat)catch(0)
+            for i = 1 to nMtl do
+            (
+                local subMtl = try(getSubMtl mat i)catch(undefined)
+                if subMtl != undefined do walkMatForAlbedo subMtl visitedMats visitedTex bestMapRef bestScoreRef
+            )
+        ),
+        
+        fn findBestAlbedoMap rootMat =
+        (
+            if rootMat == undefined do return undefined
+            
+            local visitedMats = #()
+            local visitedTex = #()
+            local bestMapRef = #(undefined)
+            local bestScoreRef = #(-100000)
+            
+            walkMatForAlbedo rootMat visitedMats visitedTex bestMapRef bestScoreRef
+            
+            if bestScoreRef[1] > 0 then bestMapRef[1] else undefined
+        ),
+        
+        fn getMapFilename tex =
+        (
+            if tex == undefined do return ""
+            local p = try(tex.filename as string)catch("")
+            if p == "" do p = try(tex.Filename as string)catch("")
+            p
+        ),
+        
+        fn findFilenameInTexTree tex visitedTex =
+        (
+            if tex == undefined do return ""
+            if findItem visitedTex tex > 0 do return ""
+            append visitedTex tex
+            
+            local p = getMapFilename tex
+            if p != "" do return p
+            
+            local nSub = try(getNumSubTexmaps tex)catch(0)
+            for i = 1 to nSub do
+            (
+                local subTex = try(getSubTexmap tex i)catch(undefined)
+                local subPath = findFilenameInTexTree subTex visitedTex
+                if subPath != "" do return subPath
+            )
+            
+            ""
+        ),
+
+        fn sanitizeFileToken s =
+        (
+            local t = if s == undefined then "" else (s as string)
+            if t == "" do t = "map"
+            for bad in #("\\", "/", ":", "*", "?", "\"", "<", ">", "|", " ", ".", ";", "'", "`", "=", "+", "(", ")", "[", "]", "{", "}") do
+                t = substituteString t bad "_"
+            while (findString t "__") != undefined do t = substituteString t "__" "_"
+            if t == "" do t = "map"
+            t
+        ),
+
+        fn runMagickResize256 sourcePath targetPath =
+        (
+            if sourcePath == "" or not doesFileExist sourcePath do return false
+
+            local si = dotNetObject "System.Diagnostics.ProcessStartInfo"
+            si.FileName = "magick"
+            si.Arguments = ("\"" + sourcePath + "\" -resize 256x256! \"" + targetPath + "\"")
+            si.UseShellExecute = false
+            si.CreateNoWindow = true
+            si.RedirectStandardOutput = true
+            si.RedirectStandardError = true
+
+            local p = dotNetObject "System.Diagnostics.Process"
+            p.StartInfo = si
+
+            local started = try(p.Start())catch(false)
+            if not started do return false
+
+            try(p.WaitForExit())catch(return false)
+            local exitCode = try(p.ExitCode)catch(-1)
+            (exitCode == 0 and doesFileExist targetPath)
+        ),
+
+        fn makeShellPreviewPath256 sourcePath mapLabel:"" =
+        (
+            if sourcePath == "" do return ""
+
+            local tempRoot = (getDir #temp) + "\\PowerShader_SHLL"
+            try(makeDir tempRoot)catch()
+
+            local srcToken = sanitizeFileToken (getFilenameFile sourcePath)
+            local lblToken = sanitizeFileToken mapLabel
+            local outName = "shll_" + srcToken
+            if lblToken != "" do outName += "_" + lblToken
+            outName += "_" + (timestamp() as string) + "_" + ((random 1000 9999) as string) + ".png"
+            local outPath = tempRoot + "\\" + outName
+
+            if runMagickResize256 sourcePath outPath then outPath else ""
+        ),
+        
+        fn makeUberBitmapFromMap albedoMap mapLabel:"" =
+        (
+            if albedoMap == undefined do return undefined
+            if not hasOSL do return undefined
+            
+            local texPath = findFilenameInTexTree albedoMap #()
+            if texPath == "" do return undefined
+            
+            local uber = try(OSL_uberBitmap2b())catch(undefined)
+            if uber == undefined do return undefined
+            
+            local previewPath = makeShellPreviewPath256 texPath mapLabel:mapLabel
+            if previewPath == "" do previewPath = texPath
+            try(uber.filename = previewPath)catch()
+            if mapLabel != "" do try(uber.name = "preview_uber_" + mapLabel)catch()
+            
+            uber
+        ),
+        
+        fn shellSelectionToViewport =
+        (
+            if selection.count == 0 do
+            (
+                setStatus "SHLL: Select object(s) first." col:cFavorite
+                return false
+            )
+            
+            local srcMats = #()
+            local shellMats = #()
+            local shellsCreated = 0
+            local objsAssigned = 0
+            local albedoLinked = 0
+            local failed = 0
+            local skippedShell = 0
+            
+            for obj in selection do
+            (
+                local src = try(obj.material)catch(undefined)
+                if src == undefined do
+                (
+                    failed += 1
+                    continue
+                )
+                
+                if isKindOf src Shell_Material do
+                (
+                    skippedShell += 1
+                    continue
+                )
+                
+                local shellMat = undefined
+                local idx = findItem srcMats src
+                
+                if idx > 0 then
+                (
+                    shellMat = shellMats[idx]
+                )
+                else
+                (
+                    local original = src
+                    if original == undefined do
+                    (
+                        failed += 1
+                        continue
+                    )
+                    
+                    local albedoMap = findBestAlbedoMap original
+                    local previewMap = if albedoMap != undefined then makeUberBitmapFromMap albedoMap mapLabel:(try(original.name)catch("")) else undefined
+                    if previewMap == undefined do
+                    (
+                        failed += 1
+                        continue
+                    )
+                    
+                    local phys = PhysicalMaterial()
+                    local baseName = try(original.name)catch("")
+                    if baseName == "" do baseName = (classOf original as string)
+                    try(phys.name = "preview_" + baseName)catch()
+                    
+                    try(phys.base_color_map = previewMap)catch()
+                    try(phys.base_color_map_on = true)catch()
+                    albedoLinked += 1
+                    
+                    shellMat = Shell_Material()
+                    try(shellMat.name = "shell_" + baseName)catch()
+                    try(shellMat.originalMaterial = original)catch()
+                    try(shellMat.bakedMaterial = phys)catch()
+                    
+                    try(shellMat.viewportMtlIndex = 1)catch()
+                    try(shellMat.renderMtlIndex = 0)catch()
+                    
+                    append srcMats src
+                    append shellMats shellMat
+                    shellsCreated += 1
+                )
+                
+                if shellMat != undefined then
+                (
+                    if try((obj.material = shellMat); true)catch(false) then objsAssigned += 1 else failed += 1
+                )
+                else failed += 1
+            )
+            
+            if objsAssigned > 0 do redrawViews()
+            
+            if objsAssigned > 0 then
+            (
+                local msg = "SHLL: " + objsAssigned as string + " object(s), " + albedoLinked as string + " albedo link(s)"
+                if skippedShell > 0 do msg += ", " + skippedShell as string + " shell skipped"
+                if failed > 0 do msg += ", " + failed as string + " failed"
+                setStatus msg col:cRecent
+                return true
+            )
+            else
+            (
+                if skippedShell > 0 and failed == 0 then
+                    setStatus "SHLL: Selected material(s) already Shell_Material. No changes." col:cTextDim
+                else
+                    setStatus "SHLL: No valid albedo/uberbitmap source found. No shell created." col:cFavorite
+                return false
+            )
+        ),
+        
+        -- ============== LINK MAPS ==============
+
+        fn isSupportedBitmap m =
+        (
+            local cls = classOf m
+            cls == ai_image or cls == Bitmaptexture or cls == OSLMap
+        ),
+
+        fn linkMapScales maps =
+        (
+            if maps.count < 2 do return 0
+
+            -- Read initial values from first map
+            local firstMap = maps[1]
+            local cls1 = classOf firstMap
+            local scaleVal = case cls1 of
+            (
+                ai_image: firstMap.sscale
+                Bitmaptexture: firstMap.coords.U_Tiling
+                OSLMap: try(firstMap.scale)catch(1.0)
+                default: 1.0
+            )
+
+            -- Single shared controller for uniform scale
+            local ctrl = bezier_float()
+            ctrl.value = scaleVal
+
+            local linked = 0
+            for m in maps do
+            (
+                local cls = classOf m
+                local ok = false
+                case cls of
+                (
+                    ai_image:
+                    (
+                        try(setPropertyController m #sscale ctrl; ok = true)catch()
+                        try(setPropertyController m #tscale ctrl)catch()
+                    )
+                    Bitmaptexture:
+                    (
+                        try(setPropertyController m.coords #U_Tiling ctrl; ok = true)catch()
+                        try(setPropertyController m.coords #V_Tiling ctrl)catch()
+                    )
+                    OSLMap:
+                    (
+                        try(setPropertyController m #scale ctrl; ok = true)catch()
+                    )
+                    default: ()
+                )
+                if ok do linked += 1
+            )
+            linked
+        ),
+
+        fn linkMapsOnSelection =
+        (
+            -- Get selected maps from SME
+            if not SME.isOpen() do
+            (
+                setStatus "LINK: Open Slate Material Editor first." col:cFavorite
+                return false
+            )
+
+            local view = SME.GetView (SME.activeView)
+            local selNodes = view.GetSelectedNodes()
+
+            if selNodes.count < 2 do
+            (
+                setStatus "LINK: Select 2+ bitmap nodes in SME." col:cFavorite
+                return false
+            )
+
+            -- Collect supported bitmap maps from SME selection
+            local maps = #()
+            for i = 1 to selNodes.count do
+            (
+                local ref = try(selNodes[i].reference)catch(undefined)
+                if ref != undefined and isSupportedBitmap ref do
+                    append maps ref
+            )
+
+            if maps.count < 2 do
+            (
+                setStatus "LINK: Need 2+ bitmap maps selected (ai_image, Bitmap, OSL)." col:cFavorite
+                return false
+            )
+
+            local linked = linkMapScales maps
+
+            if linked > 0 then
+            (
+                setStatus ("LINK: " + linked as string + " map(s) linked") col:cRecent
+                return true
+            )
+            else
+            (
+                setStatus "LINK: Failed to link maps." col:cFavorite
+                return false
+            )
+        ),
+
+        -- ============== FLUSH TEXTURES ==============
+
+        fn flushSelectionTextures =
+        (
+            -- Arnold: Flush Arnold Textures Cache (table 695602995, action 2)
+            local ok = actionMan.executeAction 695602995 "2"
+            if ok then
+                setStatus "FLSH: Arnold texture cache flushed" col:cRecent
+            else
+                setStatus "FLSH: Failed - is Arnold active?" col:cFavorite
+            ok
+        ),
+
         fn spawnShader matClass applyToSel:false isDrop:false =
         (
+            if matClass == #SHLL do
+            (
+                local ok = shellSelectionToViewport()
+                if ok do try(form.Close())catch()
+                return ok
+            )
+            
             if matClass == undefined do return (messagebox "Class not found." title:"PowerShader")
 
             local inst = try(matClass()) catch(matClass)
@@ -285,9 +826,7 @@ global PowerShaderInstance
                 
                 if newSmeNode != undefined do 
                 (
-                    view.SelectNone()
-                    try(newSmeNode.selected = true) catch()
-					try(view.ZoomExtents type:#selected) catch()
+                    focusSmeNode view newSmeNode
                 )
             )
             else
@@ -301,13 +840,13 @@ global PowerShaderInstance
         
         -- ============== LIST BUILDING ==============
         
-        fn rebuildList =
+        fn refreshSourceData =
         (
             local tmp = #()
             
             -- Always add materials and maps
-            for c in material.classes do append tmp #("" + (c as string), c, "Mat")
-            for c in textureMap.classes do append tmp #("" + (c as string), c, "Map")
+            for c in material.classes where isBrowsableClass c do append tmp #("" + (c as string), c, "Mat")
+            for c in textureMap.classes where isBrowsableClass c do append tmp #("" + (c as string), c, "Map")
             
             -- Scene materials and bitmaps
             for m in sceneMaterials where m != undefined do
@@ -326,37 +865,57 @@ global PowerShaderInstance
             allNames = for p in tmp collect p[1]
             allClasses = for p in tmp collect p[2]
             allCategories = for p in tmp collect p[3]
+            allNamesLower = for n in allNames collect (toLower n)
+            allClassKeys = for c in allClasses collect (c as string)
+        ),
+        
+        fn rebuildList rescan:false =
+        (
+            if rescan or allNames.count == 0 do refreshSourceData()
             
             -- Filter by search
-            local s = substituteString (toLower txtSearch.Text) " " "*"
+            local searchText = toLower (txtSearch.Text as string)
+            local hasSearch = searchText != ""
+            local searchPattern = if hasSearch then ("*" + (substituteString searchText " " "*") + "*") else ""
+            local sceneOnly = try(chkSceneItems.Checked)catch(false)
+            
             currentNames = #()
             currentClasses = #()
+            currentClassKeys = #()
             
             lstResults.BeginUpdate()
             lstResults.Items.Clear()
             
             for i = 1 to allNames.count do
             (
-                local matchSearch = matchPattern (toLower allNames[i]) pattern:("*" + s + "*")
-                local matchTab = case currentTab of
+                local classKey = allClassKeys[i]
+                local isFav = findItem favorites classKey > 0
+                local isSceneItem = allCategories[i] == "Scene"
+                local matchSearch = if hasSearch then matchPattern allNamesLower[i] pattern:searchPattern else true
+                local matchScope = if sceneOnly then isSceneItem else (not isSceneItem)
+                local matchTab = true
+                if not sceneOnly do
                 (
-                    "All": true
-                    "Mat": allCategories[i] == "Mat"
-                    "Map": allCategories[i] == "Map"
-                    "Scene": allCategories[i] == "Scene"
-                    "Fav": isFavorite allClasses[i]
-                    default: true
+                    matchTab = case currentTab of
+                    (
+                        "All": true
+                        "Mat": allCategories[i] == "Mat"
+                        "Map": allCategories[i] == "Map"
+                        "Fav": isFav
+                        default: true
+                    )
                 )
                 
-                if matchSearch and matchTab do
+                if matchScope and matchSearch and matchTab do
                 (
                     append currentNames allNames[i]
                     append currentClasses allClasses[i]
+                    append currentClassKeys classKey
                     
                     -- Build display string with indicators
                     local prefix = ""
-                    if isFavorite allClasses[i] do prefix = "★ "
-                    if findItem recentItems (allClasses[i] as string) > 0 do prefix = "● "
+                    if isFav do prefix = "★ "
+                    if findItem recentItems classKey > 0 do prefix = "● "
                     
                     local catTag = case allCategories[i] of
                     (
@@ -389,19 +948,22 @@ global PowerShaderInstance
                 psi.allowDrag = true
                 
                 -- Shaders
-                if s.Text == "USD"    do psi.dragItem = MaxUsdPreviewSurface
+                if s.Text == "ARND"   do psi.dragItem = try(ai_standard_surface)catch(undefined)
                 if s.Text == "PHYS"   do psi.dragItem = PhysicalMaterial
-                if s.Text == "RS"     do psi.dragItem = try(RS_Standard_Material)catch(undefined)
+                if s.Text == "USD"    do psi.dragItem = MaxUsdPreviewSurface
                 if s.Text == "PBR"    do psi.dragItem = try(OpenPBR_Material)catch(undefined)
                 if s.Text == "GLTF"   do psi.dragItem = try(glTFMaterial)catch(undefined)
+                if s.Text == "SHLL"   do (psi.dragItem = #SHLL; psi.allowDrag = false)
                 
                 -- Maps (click only, no drag)
                 if s.Text == "OSL"    do (psi.dragItem = try(OSL_uberBitmap2b)catch(undefined); psi.allowDrag = false)
                 if s.Text == "BMP"    do (psi.dragItem = Bitmaptexture; psi.allowDrag = false)
                 if s.Text == "RS TX"  do (psi.dragItem = try(RS_Texture)catch(undefined); psi.allowDrag = false)
                 if s.Text == "TY"     do (psi.dragItem = try(tyBitmap)catch(undefined); psi.allowDrag = false)
-                if s.Text == "Noise"  do (psi.dragItem = Noise; psi.allowDrag = false)
+                if s.Text == "Noise"  do (psi.dragItem = try(osl_UberNoise)catch(Noise); psi.allowDrag = false)
                 if s.Text == "Grad"   do (psi.dragItem = Gradient_Ramp; psi.allowDrag = false)
+                if s.Text == "LINK"   do (psi.dragItem = undefined; psi.allowDrag = false; psi.linkMapsOnSelection())
+                if s.Text == "FLSH"   do (psi.dragItem = undefined; psi.allowDrag = false; psi.flushSelectionTextures())
             )
         ),
         
@@ -513,12 +1075,19 @@ global PowerShaderInstance
             if e.KeyCode == Keys.Tab do
             (
                 -- Cycle through tabs
-                local tabs = #("All", "Mat", "Map", "Scene", "Fav")
+                local tabs = #("All", "Mat", "Map", "Fav")
                 local idx = findItem tabs psi.currentTab
                 idx = mod idx tabs.count + 1
                 psi.currentTab = tabs[idx]
                 psi.updateTabVisuals()
                 psi.rebuildList()
+                e.Handled = true
+                e.SuppressKeyPress = true
+            )
+            
+            if e.KeyCode == Keys.F5 do
+            (
+                psi.rebuildList rescan:true
                 e.Handled = true
                 e.SuppressKeyPress = true
             )
@@ -534,8 +1103,8 @@ global PowerShaderInstance
         
         fn updateTabVisuals =
         (
-            local tabs = #(tabAll, tabMat, tabMap, tabScene, tabFav)
-            local names = #("All", "Mat", "Map", "Scene", "Fav")
+            local tabs = #(tabAll, tabMat, tabMap, tabFav)
+            local names = #("All", "Mat", "Map", "Fav")
             
             for i = 1 to tabs.count do
             (
@@ -560,18 +1129,24 @@ global PowerShaderInstance
             (
                 form.Height = compactHeight
                 lstResults.Visible = false
+                setPreviewLayout false
                 pnlStatus.Visible = false
                 tabBar.Visible = false
                 chkApplyToSel.Visible = false
+                chkSceneItems.Visible = false
+                chkAutoFocus.Visible = false
                 btnCompact.Text = "▼"
             )
             else
             (
                 form.Height = expandedHeight
                 lstResults.Visible = true
+                setPreviewLayout (picPreview != undefined and picPreview.Image != undefined)
                 pnlStatus.Visible = true
                 tabBar.Visible = true
                 chkApplyToSel.Visible = true
+                chkSceneItems.Visible = true
+                chkAutoFocus.Visible = true
                 btnCompact.Text = "▲"
             )
         ),
@@ -663,11 +1238,7 @@ global PowerShaderInstance
             )
             
             -- Tooltip
-            if tooltip != "" do
-            (
-                local tt = dotNetObject "System.Windows.Forms.ToolTip"
-                tt.SetToolTip btn tooltip
-            )
+            if tooltip != "" and psi.uiToolTip != undefined do psi.uiToolTip.SetToolTip btn tooltip
             
             -- Hover effects
             dotNet.addEventHandler btn "MouseEnter" (fn onEnter s e = (
@@ -734,6 +1305,13 @@ global PowerShaderInstance
             form.KeyPreview = true
             form.Opacity = 0.95  -- Instant opacity, no fade
             
+            form.SuspendLayout()
+            uiToolTip = dotNetObject "System.Windows.Forms.ToolTip"
+            uiToolTip.AutoPopDelay = 5000
+            uiToolTip.InitialDelay = 300
+            uiToolTip.ReshowDelay = 150
+            uiToolTip.ShowAlways = true
+            
             local yPos = 8
             
             -- ============== HEADER PANEL ==============
@@ -768,21 +1346,21 @@ global PowerShaderInstance
             
             yPos += 44
             
-            -- ============== QUICK BUTTONS ROW 1 (SHADERS - USD First) ==============
+            -- ============== QUICK BUTTONS ROW 1 (SHADERS) ==============
             local btnW = 50
             local btnH = 26
             local gap = 4
             local xPos = 8
-            
-            -- USD button first and highlighted
-            btnUSD = dotNetObject "System.Windows.Forms.Button"
-            btnUSD.Text = "USD"
-            btnUSD.Tag = "USD Preview Surface - Universal shader (RECOMMENDED)"
-            btnUSD.Location = dotNetObject "System.Drawing.Point" xPos yPos
-            btnUSD.Size = dotNetObject "System.Drawing.Size" btnW btnH
-            styleButton btnUSD tooltip:"USD Preview Surface (Drag to viewport)" enabled:hasUSD highlight:true
+
+            -- Arnold button first
+            btnARND = dotNetObject "System.Windows.Forms.Button"
+            btnARND.Text = "ARND"
+            btnARND.Tag = "Arnold Standard Surface - Arnold renderer shader"
+            btnARND.Location = dotNetObject "System.Drawing.Point" xPos yPos
+            btnARND.Size = dotNetObject "System.Drawing.Size" btnW btnH
+            styleButton btnARND tooltip:"Arnold Standard Surface (Drag to viewport)" enabled:true
             xPos += btnW + gap
-            
+
             btnPhys = dotNetObject "System.Windows.Forms.Button"
             btnPhys.Text = "PHYS"
             btnPhys.Tag = "Physical Material - Autodesk standard PBR"
@@ -790,13 +1368,13 @@ global PowerShaderInstance
             btnPhys.Size = dotNetObject "System.Drawing.Size" btnW btnH
             styleButton btnPhys tooltip:"Physical Material (Drag to viewport)" enabled:true
             xPos += btnW + gap
-            
-            btnRS = dotNetObject "System.Windows.Forms.Button"
-            btnRS.Text = "RS"
-            btnRS.Tag = "Redshift Standard Material"
-            btnRS.Location = dotNetObject "System.Drawing.Point" xPos yPos
-            btnRS.Size = dotNetObject "System.Drawing.Size" btnW btnH
-            styleButton btnRS tooltip:"Redshift Standard Material (Drag to viewport)" enabled:hasRedshift
+
+            btnUSD = dotNetObject "System.Windows.Forms.Button"
+            btnUSD.Text = "USD"
+            btnUSD.Tag = "USD Preview Surface - Universal shader (RECOMMENDED)"
+            btnUSD.Location = dotNetObject "System.Drawing.Point" xPos yPos
+            btnUSD.Size = dotNetObject "System.Drawing.Size" btnW btnH
+            styleButton btnUSD tooltip:"USD Preview Surface (Drag to viewport)" enabled:hasUSD highlight:true
             xPos += btnW + gap
             
             btnPBR = dotNetObject "System.Windows.Forms.Button"
@@ -813,6 +1391,14 @@ global PowerShaderInstance
             btnGLTF.Location = dotNetObject "System.Drawing.Point" xPos yPos
             btnGLTF.Size = dotNetObject "System.Drawing.Size" btnW btnH
             styleButton btnGLTF tooltip:"glTF Material (Drag to viewport)" enabled:hasGLTF
+            xPos += btnW + gap
+            
+            btnSHLL = dotNetObject "System.Windows.Forms.Button"
+            btnSHLL.Text = "SHLL"
+            btnSHLL.Tag = "Shell selected material(s): render shader + Physical viewport preview"
+            btnSHLL.Location = dotNetObject "System.Drawing.Point" xPos yPos
+            btnSHLL.Size = dotNetObject "System.Drawing.Size" btnW btnH
+            styleButton btnSHLL tooltip:"Create/Update Shell_Material on selection using detected albedo map" enabled:true
             
             yPos += btnH + gap
             xPos = 8
@@ -853,10 +1439,10 @@ global PowerShaderInstance
             
             btnNoise = dotNetObject "System.Windows.Forms.Button"
             btnNoise.Text = "Noise"
-            btnNoise.Tag = "Noise Map - Click to create"
+            btnNoise.Tag = "OSL UberNoise - Click to create"
             btnNoise.Location = dotNetObject "System.Drawing.Point" xPos yPos
             btnNoise.Size = dotNetObject "System.Drawing.Size" 58 btnH
-            styleButton btnNoise tooltip:"Noise Map (Click to create)" enabled:true
+            styleButton btnNoise tooltip:"OSL UberNoise (Click to create)" enabled:true
             xPos += 58 + gap
             
             btnGrad = dotNetObject "System.Windows.Forms.Button"
@@ -865,16 +1451,35 @@ global PowerShaderInstance
             btnGrad.Location = dotNetObject "System.Drawing.Point" xPos yPos
             btnGrad.Size = dotNetObject "System.Drawing.Size" 50 btnH
             styleButton btnGrad tooltip:"Gradient Ramp (Click to create)" enabled:true
-            
+
+            yPos += btnH + gap
+            xPos = 8
+
+            -- ============== QUICK BUTTONS ROW 3 (UTILITIES) ==============
+            btnLINK = dotNetObject "System.Windows.Forms.Button"
+            btnLINK.Text = "LINK"
+            btnLINK.Tag = "Link map tiling - shares scale controllers across all maps in material"
+            btnLINK.Location = dotNetObject "System.Drawing.Point" xPos yPos
+            btnLINK.Size = dotNetObject "System.Drawing.Size" btnW btnH
+            styleButton btnLINK tooltip:"Link all texture map scales in selected object's material (Click)" enabled:true
+            xPos += btnW + gap
+
+            btnFLSH = dotNetObject "System.Windows.Forms.Button"
+            btnFLSH.Text = "FLSH"
+            btnFLSH.Tag = "Flush selected object's textures from Arnold cache"
+            btnFLSH.Location = dotNetObject "System.Drawing.Point" xPos yPos
+            btnFLSH.Size = dotNetObject "System.Drawing.Size" btnW btnH
+            styleButton btnFLSH tooltip:"Invalidate Arnold texture cache for selected object's maps (Click)" enabled:true
+
             yPos += btnH + 8
-            
+
             -- ============== TAB BAR ==============
             tabBar = dotNetObject "System.Windows.Forms.Panel"
             tabBar.Location = dotNetObject "System.Drawing.Point" 8 yPos
             tabBar.Size = dotNetObject "System.Drawing.Size" 328 24
             tabBar.BackColor = cPanel
             
-            local tabW = 65
+            local tabW = 82
             local tabX = 0
             
             tabAll = dotNetObject "System.Windows.Forms.Button"
@@ -904,15 +1509,6 @@ global PowerShaderInstance
             tabBar.Controls.Add tabMap
             tabX += tabW
             
-            tabScene = dotNetObject "System.Windows.Forms.Button"
-            tabScene.Text = "Scene"
-            tabScene.Tag = "Scene"
-            tabScene.Location = dotNetObject "System.Drawing.Point" tabX 0
-            tabScene.Size = dotNetObject "System.Drawing.Size" tabW 24
-            styleTabButton tabScene
-            tabBar.Controls.Add tabScene
-            tabX += tabW
-            
             tabFav = dotNetObject "System.Windows.Forms.Button"
             tabFav.Text = "★ Favs"
             tabFav.Tag = "Fav"
@@ -931,13 +1527,33 @@ global PowerShaderInstance
             chkApplyToSel.ForeColor = cTextDim
             chkApplyToSel.Font = FontSmall
             chkApplyToSel.FlatStyle = (dotNetClass "System.Windows.Forms.FlatStyle").Flat
+            chkApplyToSel.Checked = setApplyToSel
             
-            yPos += 26
+            chkSceneItems = dotNetObject "System.Windows.Forms.CheckBox"
+            chkSceneItems.Text = "Scene Items"
+            chkSceneItems.Location = dotNetObject "System.Drawing.Point" 170 yPos
+            chkSceneItems.Size = dotNetObject "System.Drawing.Size" 120 20
+            chkSceneItems.ForeColor = cTextDim
+            chkSceneItems.Font = FontSmall
+            chkSceneItems.FlatStyle = (dotNetClass "System.Windows.Forms.FlatStyle").Flat
+            chkSceneItems.Checked = setSceneItems
+            
+            chkAutoFocus = dotNetObject "System.Windows.Forms.CheckBox"
+            chkAutoFocus.Text = "Auto Focus Nodes"
+            chkAutoFocus.Location = dotNetObject "System.Drawing.Point" 12 (yPos + 20)
+            chkAutoFocus.Size = dotNetObject "System.Drawing.Size" 150 20
+            chkAutoFocus.ForeColor = cTextDim
+            chkAutoFocus.Font = FontSmall
+            chkAutoFocus.FlatStyle = (dotNetClass "System.Windows.Forms.FlatStyle").Flat
+            chkAutoFocus.Checked = setAutoFocus
+            
+            yPos += 46
             
             -- ============== RESULTS LIST ==============
+            local listTop = yPos
             lstResults = dotNetObject "System.Windows.Forms.ListBox"
             lstResults.Location = dotNetObject "System.Drawing.Point" 8 yPos
-            lstResults.Size = dotNetObject "System.Drawing.Size" 328 240
+            lstResults.Size = dotNetObject "System.Drawing.Size" listWidthFull 240
             lstResults.BackColor = cBackground
             lstResults.ForeColor = cText
             lstResults.BorderStyle = (dotNetClass "System.Windows.Forms.BorderStyle").None
@@ -949,9 +1565,10 @@ global PowerShaderInstance
             
             -- ============== PREVIEW PANEL (for bitmaps) ==============
             pnlPreview = dotNetObject "System.Windows.Forms.Panel"
-            pnlPreview.Location = dotNetObject "System.Drawing.Point" 240 160
-            pnlPreview.Size = dotNetObject "System.Drawing.Size" 96 96
-            pnlPreview.BackColor = cPanel
+            pnlPreview.Location = dotNetObject "System.Drawing.Point" 236 listTop
+            pnlPreview.Size = dotNetObject "System.Drawing.Size" 100 100
+            pnlPreview.BackColor = cPanelLight
+            pnlPreview.BorderStyle = (dotNetClass "System.Windows.Forms.BorderStyle").FixedSingle
             pnlPreview.Visible = false
             
             picPreview = dotNetObject "System.Windows.Forms.PictureBox"
@@ -977,10 +1594,13 @@ global PowerShaderInstance
             -- ============== ADD ALL CONTROLS ==============
             form.Controls.AddRange #(
                 pnlHeader,
-                btnUSD, btnPhys, btnRS, btnPBR, btnGLTF,
+                btnARND, btnPhys, btnUSD, btnPBR, btnGLTF, btnSHLL,
                 btnOSL, btnBMP, btnRSTX, btnTY, btnNoise, btnGrad,
+                btnLINK, btnFLSH,
                 tabBar,
                 chkApplyToSel,
+                chkSceneItems,
+                chkAutoFocus,
                 lstResults,
                 pnlPreview,
                 pnlStatus
@@ -1002,10 +1622,26 @@ global PowerShaderInstance
             
             dotNet.addEventHandler form "FormClosing" (fn onClose s e = (
                 PowerShaderInstance.saveSettings()
+                PowerShaderInstance.clearPreview()
+                try(if PowerShaderInstance.uiToolTip != undefined do PowerShaderInstance.uiToolTip.Dispose())catch()
+                PowerShaderInstance.uiToolTip = undefined
             ))
             
             dotNet.addEventHandler txtSearch "TextChanged" (fn onTxtChange s e = (
                 PowerShaderInstance.rebuildList()
+            ))
+            
+            dotNet.addEventHandler chkSceneItems "CheckedChanged" (fn onSceneToggle s e = (
+                PowerShaderInstance.rebuildList()
+                PowerShaderInstance.saveSettings()
+            ))
+            
+            dotNet.addEventHandler chkApplyToSel "CheckedChanged" (fn onApplyToggle s e = (
+                PowerShaderInstance.saveSettings()
+            ))
+            
+            dotNet.addEventHandler chkAutoFocus "CheckedChanged" (fn onFocusToggle s e = (
+                PowerShaderInstance.saveSettings()
             ))
             
             dotNet.addEventHandler txtSearch "KeyDown" onSearchKeyDown
@@ -1028,8 +1664,9 @@ global PowerShaderInstance
             ))
             
             -- Initialize
+            form.ResumeLayout false
             updateTabVisuals()
-            rebuildList()
+            rebuildList rescan:true
             form.ShowModeless()
         )
     )
