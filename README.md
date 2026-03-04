@@ -68,6 +68,13 @@ Quickly turns an object into a live surface and enables freeform retopology tool
 - **Collapse.ms** - Collapses modifiers but keeps TurboSmooth and Shell in the modifier stack.
 - **CopyUV0toUV1.ms** - Copies UV channel 0 to UV channel 1. Useful for creating lightmaps based on existing UVs.
 - **CloneTools-RotationAxisSnap.mcr** - Blender-style orthographic rotation axis snapping for 3ds Max.
+- **CloneTools-SendBitmapToVCanvas.mcr** - Sends a bitmap to the Viewport Canvas for quick texture painting reference.
+- **CloneTools-SwapViewports.mcr** - Swaps left and right viewport layouts.
+- **CloneTools-ViewportOpacitySlider.mcr** - Click-drag slider to adjust viewport opacity on the fly.
+- **CloneTools-ViewportTimeSlider.mcr** - Click-drag slider to scrub through the timeline directly in the viewport.
+- **ToggleTrackView.ms** - Toggles between Dope Sheet and FCurve Editor modes in Track View.
+- **ViewportOpacitySlider.ms** - Viewport opacity slider tool implementation.
+- **ViewportTimeSlider.ms** - Viewport time slider tool implementation.
 
 ---
 
